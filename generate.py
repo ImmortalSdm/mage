@@ -43,28 +43,30 @@ def gen_image(model, data, seed, num_iter=12, choice_temperature=4.5):
     sample_refer = sample_refer.cuda()
     sample_gt = sample_gt.cuda()
 
-    refer_tokens = model.get_image_token(refer)
+    refer_tokens = model.vqgan.get_codebook_indices(refer).flatten(1)
     B, N = refer_tokens.shape
-    z_q = model.vqgan.quantize.get_codebook_entry(sampled_ids, shape=(token_indices.shape[0], 8, 8, codebook_emb_dim))
-    gen_images = model.vqgan.decode(z_q)
-    refer_emb = model.vqgan.quantize.get_codebook_entry(refer_tokens, (token_indices.shape[0],int(math.sqrt(N)),int(math.sqrt(N)),256))
+    refer_emb = model.vqgan.quantize.get_codebook_entry(refer_tokens, (B,int(math.sqrt(N)),int(math.sqrt(N)),256))
     refer_img = model.vqgan.decode(refer_emb)
+    refer_img = torch.clip(refer_img.detach().cpu() *255, 0, 255)
 
-    gt_tokens = model.get_image_token(gt)
-    gt_emb = model.vqgan.quantize.get_codebook_entry(gt_tokens, (token_indices.shape[0],int(math.sqrt(N)),int(math.sqrt(N)),256))
+    gt_tokens = model.vqgan.get_codebook_indices(gt).flatten(1)
+    gt_emb = model.vqgan.quantize.get_codebook_entry(gt_tokens, (B,int(math.sqrt(N)),int(math.sqrt(N)),256))
     gt_img = model.vqgan.decode(gt_emb)
+    gt_img = torch.clip(gt_img.detach().cpu() *255, 0, 255)
 
-    sample_refer_tokens = model.get_image_token(sample_refer)
-    sample_refer_emb = model.vqgan.quantize.get_codebook_entry(sample_refer_tokens, (token_indices.shape[0],int(math.sqrt(N)),int(math.sqrt(N)),256))
+    sample_refer_tokens = model.vqgan.get_codebook_indices(sample_refer).flatten(1)
+    sample_refer_emb = model.vqgan.quantize.get_codebook_entry(sample_refer_tokens, (B,int(math.sqrt(N)),int(math.sqrt(N)),256))
     sample_refer_img = model.vqgan.decode(sample_refer_emb)
+    sample_refer_img = torch.clip(sample_refer_img.detach().cpu() *255, 0, 255)
 
-    sample_gt_tokens = model.get_image_token(sample_gt)
-    sample_gt_emb = model.vqgan.quantize.get_codebook_entry(sample_gt_tokens, (token_indices.shape[0],int(math.sqrt(N)),int(math.sqrt(N)),256))
+    sample_gt_tokens = model.vqgan.get_codebook_indices(sample_gt).flatten(1)
+    sample_gt_emb = model.vqgan.quantize.get_codebook_entry(sample_gt_tokens, (B,int(math.sqrt(N)),int(math.sqrt(N)),256))
     sample_gt_img = model.vqgan.decode(sample_gt_emb)
+    sample_gt_img = torch.clip(sample_gt_img.detach().cpu() *255, 0, 255)
 
-    sample_pair = torch.cat((sample_refer_img,sample_gt_img),1)
-    gt_pair = torch.cat((refer_img,gt_img),1)
-    q_canvas = torch.cat((sample_pair,gt_pair),0)
+    sample_pair = torch.cat((sample_refer_img,sample_gt_img),3)
+    gt_pair = torch.cat((refer_img,gt_img),3)
+    q_canvas = torch.cat((sample_pair,gt_pair),2)
 
     token_indices = torch.cat((
         sample_refer_tokens, 
@@ -133,10 +135,11 @@ def gen_image(model, data, seed, num_iter=12, choice_temperature=4.5):
     sampled_ids = sampled_ids[:, N:]
     z_q = model.vqgan.quantize.get_codebook_entry(sampled_ids, shape=(token_indices.shape[0], 8, 8, codebook_emb_dim))
     gen_images = model.vqgan.decode(z_q)
+    gen_images = torch.clip(gen_images.detach().cpu() *255, 0, 255)
 
-    sample_pair = torch.cat((sample_refer_img,sample_gt_img),1)
-    result_pair = torch.cat((refer_img,gen_images),1)
-    r_canvas = torch.cat((sample_pair,result_pair),0)
+    sample_pair = torch.cat((sample_refer_img,sample_gt_img),3)
+    result_pair = torch.cat((refer_img,gen_images),3)
+    r_canvas = torch.cat((sample_pair,result_pair),2)
     return q_canvas, r_canvas
 
 def get_args_parser():
@@ -230,10 +233,10 @@ if __name__ == '__main__':
 
         # save img
         for b_id in range(args.batch_size):
-            input_img = np.clip(q_canvas[b_id].numpy().transpose([1, 2, 0]) * 255, 0, 255)
+            input_img = q_canvas[b_id].numpy().transpose([1, 2, 0])
             input_img = input_img.astype(np.uint8)[:, :, ::-1]
             cv2.imwrite(os.path.join(save_path, 'input_{}.png'.format(str(i*args.batch_size+b_id).zfill(5))), input_img)
 
-            gen_img = np.clip(r_canvas[b_id].numpy().transpose([1, 2, 0]) * 255, 0, 255)
+            gen_img = r_canvas[b_id].numpy().transpose([1, 2, 0])
             gen_img = gen_img.astype(np.uint8)[:, :, ::-1]
             cv2.imwrite(os.path.join(save_path, 'output_{}.png'.format(str(i*args.batch_size+b_id).zfill(5))), gen_img)
