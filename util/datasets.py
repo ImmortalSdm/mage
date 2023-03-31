@@ -467,6 +467,66 @@ def get_dataset_by_type(data_type, data_path=None, transforms=None, input_size=1
         dataset_train = MyInpaintingTrainDataset(train_path, transforms, samples_num)
         dataset_val = MyInpaintingTrainDataset(val_path, transforms, samples_num)
 
+'''
+Colorization
+'''
+class DatasetColorization(Dataset):
+    def __init__(self, file_list, datapath, image_transform, mask_transform, num_samples=100, padding: bool = 1,
+                 use_original_imgsize: bool = False, flipped_order: bool = False,
+                 reverse_support_and_query: bool = False, random: bool = False):
+        self.padding = padding
+        self.random = random
+        self.use_original_imgsize = use_original_imgsize
+        self.num_samples = num_samples
+        self.image_transform = image_transform
+        self.reverse_support_and_query = reverse_support_and_query
+        self.mask_transform = mask_transform
+        with open(file_list, "r") as f:
+            imgs = []
+            for line in f.readlines():
+                line = line.strip('\n')
+                line = line.split(' ')
+                imgs.append(line)
+        self.data_dir = datapath
+        self.ds = imgs
+        # self.ds = ImageFolder(datapath)
+        self.flipped_order = flipped_order
+        del imgs
+        # self.indices = np.random.choice(np.arange(0, len(self.ds)-1), size=self.num_samples, replace=False)
+
+    def __len__(self):
+        return len(self.ds)
+
+    def create_grid_from_images(self, support_img, support_mask, query_img, query_mask):
+        if self.reverse_support_and_query:
+            support_img, support_mask, query_img, query_mask = query_img, query_mask, support_img, support_mask
+        canvas = torch.ones((support_img.shape[0], 2 * support_img.shape[1] + 2 * self.padding,
+                             2 * support_img.shape[2] + 2 * self.padding))
+        canvas[:, :support_img.shape[1], :support_img.shape[2]] = support_img
+        if self.flipped_order:
+            canvas[:, :support_img.shape[1], -support_img.shape[2]:] = query_img
+            canvas[:, -query_img.shape[1]:, -support_img.shape[2]:] = query_mask
+            canvas[:, -query_img.shape[1]:, :query_img.shape[2]] = support_mask
+        else:
+            canvas[:, -query_img.shape[1]:, :query_img.shape[2]] = query_img
+            canvas[:, :support_img.shape[1], -support_img.shape[2]:] = support_mask
+            canvas[:, -query_img.shape[1]:, -support_img.shape[2]:] = query_mask
+
+        return canvas
+
+    def __getitem__(self, idx):
+        # support_idx = np.random.choice(np.arange(0, len(self)-1))
+        # idx = self.indices[idx]
+        query_path, support_path = os.path.join(self.data_dir, self.ds[idx][0]), os.path.join(self.data_dir, self.ds[idx][1])
+        query, support = Image.open(query_path).convert('RGB'), Image.open(support_path).convert('RGB')
+        query_mask, query_img = self.mask_transform(query), self.image_transform(query)
+        support_mask, support_img = self.mask_transform(support), self.image_transform(support)
+        # grid = self.create_grid_from_images(support_img, support_mask, query_img, query_mask)
+        batch = {'query_img': query_img, 'query_mask': query_mask, 'support_img': support_img,
+                 'support_mask': support_mask} # , 'grid': grid
+
+        return batch
+
 def build_dataset(is_train, args):
     transform = build_transform(is_train, args)
 
